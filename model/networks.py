@@ -115,6 +115,7 @@ def define_G(opt):
         model_kwargs['unsupervised_arithmetic'] = model_opt.get('unsupervised_arithmetic', False)
         model_kwargs['xt_normalizer_1'] = model_opt.get('xt_normalizer_1', None)
         model_kwargs['xt_normalizer_2'] = model_opt.get('xt_normalizer_2', None)
+        model_kwargs['partial_step_training'] = model_opt.get('partial_step_training', False)
     else:
         raise NotImplementedError(
             'Generator model [{:s}] not recognized'.format(model_opt['which_model_G']))

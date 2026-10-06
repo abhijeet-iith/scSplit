@@ -27,6 +27,7 @@ class InDI(GaussianDiffusion):
         e = 0.01,
         time_predictor=None,
         xt_normalizer=None,
+        partial_step_training=False,
     ):
         super().__init__(denoise_fn, image_size, channels=channels, loss_type=loss_type, conditional=conditional, 
                          lr_reduction=lr_reduction,
@@ -47,6 +48,7 @@ class InDI(GaussianDiffusion):
         self.time_predictor = time_predictor
         self._xt_normalizer = xt_normalizer
         self._normalize_xt = self._xt_normalizer is not None
+        self.partial_step_training = partial_step_training
 
         msg = f'Sampling mode: {self._t_sampling_mode}, Noise mode: {self._noise_mode}'
         print(f'[{self.__class__.__name__}]: {msg}')
@@ -136,7 +138,7 @@ class InDI(GaussianDiffusion):
         Essentially, this is the interpolation between x_start and x_end at time t.
         Optionally, it can normalize the output as well.
         """
-        assert 0 < t.min(), "t > 0"
+        assert 0 <= t.min(), "t >= 0"
         assert t.max() <= 1, "t <= 1. but t is {}".format(t.max())
 
         if len(t.shape) ==1:
@@ -185,10 +187,13 @@ class InDI(GaussianDiffusion):
     
     def get_prediction_during_training(self, x_in, noise=None, use_superimposed_input=False):
         # we want to make sure that the shape for x_end is the same as x_start.
+        target = None
+        target_t = None
         if use_superimposed_input:
             x_superimposed_input = x_in['superimposed_input'] # this is already some mixture of x_start and x_end. it can come from microscope
             x_clean = x_superimposed_input
             t_float = self.time_predictor(x_clean)
+            step_float = t_float
         else:
             x_start = x_in['target']
             x_end = x_in['input']
@@ -197,23 +202,45 @@ class InDI(GaussianDiffusion):
             b, *_ = x_start.shape
             t_float = self.sample_t(b, x_start.device)
             x_clean = self.get_xt_clean(x_start=x_start, x_end=x_end, t=t_float)
+            if self.partial_step_training:
+                step_float = torch.rand_like(t_float) * t_float
+                target_t = t_float - step_float
+                target = self.get_xt_clean(
+                    x_start=x_start,
+                    x_end=x_end,
+                    t=target_t,
+                )
+                target = self.normalize_xt(target, target_t, update=False)
+            else:
+                step_float = t_float
+                target_t = torch.zeros_like(t_float)
+                target = None
 
         noise = default(noise, lambda: torch.randn_like(x_clean))
         x_noisy = x_clean + noise * self.get_t_times_e(t_float).reshape(-1, 1, 1, 1)
 
         assert self.conditional is False
-        x_recon = self.denoise_fn(x_noisy, t_float)
-        return x_recon, {'t_float': t_float, 'x_clean': x_clean}
+        conditioning_time = step_float if self.partial_step_training else t_float
+        x_recon = self.denoise_fn(x_noisy, conditioning_time)
+        return x_recon, {
+            't_float': t_float,
+            'b_float': step_float,
+            'target_t': target_t,
+            'x_clean': x_clean,
+            'target': target,
+        }
 
     def p_losses(self, x_in, noise=None):
         x_start = x_in['target']
-        x_recon, _ = self.get_prediction_during_training(x_in, noise=noise)   
+        x_recon, prediction_dict = self.get_prediction_during_training(x_in, noise=noise)
         device = x_start.device
-        x_start = self._xt_normalizer.normalize(x_start, torch.Tensor([0.0]*len(x_start)).to(device), update=False)
-        loss = self.loss_func(x_start, x_recon)
+        if self.partial_step_training:
+            target = prediction_dict['target']
+        else:
+            target = self._xt_normalizer.normalize(x_start, torch.Tensor([0.0]*len(x_start)).to(device), update=False)
+        loss = self.loss_func(target, x_recon)
 
         return loss
 
     def forward(self, x, *args, **kwargs):
         return self.p_losses(x, *args, **kwargs)
-

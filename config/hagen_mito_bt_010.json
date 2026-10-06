@@ -46,6 +46,7 @@
     "normalize_xt": true,
     "finetune_norm": false,
     "allow_full_translation": true,
+    "partial_step_training": true,
     "enable_time_predictor": false,
     "unet": {
       "in_channel": 1,

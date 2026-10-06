@@ -67,6 +67,7 @@ class JointIndi(nn.Module):
         time_predictor=None,
         xt_normalizer_1=None,
         xt_normalizer_2=None,
+        partial_step_training=False,
     ):
         super().__init__()
         self._enable_unsupervised_arithmetic = unsupervised_arithmetic
@@ -89,6 +90,7 @@ class JointIndi(nn.Module):
                           e=e,
                             time_predictor=self.time_predictor1,
                             xt_normalizer=xt_normalizer_1,
+                            partial_step_training=partial_step_training,
                           )
 
         self.indi2 = indi_class(denoise_fn_ch2, image_size, channels=channels, 
@@ -101,6 +103,7 @@ class JointIndi(nn.Module):
                           e=e,
                             time_predictor=self.time_predictor2,
                             xt_normalizer=xt_normalizer_2,
+                            partial_step_training=partial_step_training,
                             )
 
         self.val_num_timesteps = self.indi1.val_num_timesteps
@@ -163,8 +166,12 @@ class JointIndi(nn.Module):
         x_recon_ch1, pred_dict1 = self.indi1.get_prediction_during_training(x_in_ch1, noise=noise)    
         x_recon_ch2, pred_dict2 = self.indi2.get_prediction_during_training(x_in_ch2, noise=noise)
         device = x_in['target'].device
-        tar1_norm = self.indi1.normalize_xt(x_in_ch1['target'], torch.Tensor([0.001]*len(x_in_ch1['target'])).to(device))
-        tar2_norm = self.indi1.normalize_xt(x_in_ch2['target'], torch.Tensor([0.999]*len(x_in_ch2['target'])).to(device))
+        if self.indi1.partial_step_training:
+            tar1_norm = pred_dict1['target']
+            tar2_norm = pred_dict2['target']
+        else:
+            tar1_norm = self.indi1.normalize_xt(x_in_ch1['target'], torch.Tensor([0.001]*len(x_in_ch1['target'])).to(device))
+            tar2_norm = self.indi1.normalize_xt(x_in_ch2['target'], torch.Tensor([0.999]*len(x_in_ch2['target'])).to(device))
         
         loss_ch1 = self.indi1.loss_func(tar1_norm, x_recon_ch1)
         loss_ch2 = self.indi2.loss_func(tar2_norm, x_recon_ch2)
