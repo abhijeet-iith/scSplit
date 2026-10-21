@@ -97,14 +97,45 @@ class DDPM(BaseModel):
                 if len(self.data['input'].shape) ==1:
                     ch1 = self.data['target'][:,:1]
                     ch2 = self.data['target'][:,1:]
-                    inp1, inp2 = self.netG.get_xt_clean(ch1, ch2, torch.Tensor([0.5]*len(ch1)).to(ch1.device), update=True)
+                    inp1, inp2 = self.netG.get_xt_clean(
+                        ch1,
+                        ch2,
+                        torch.Tensor([0.5]*len(ch1)).to(ch1.device),
+                        update=False,
+                    )
                 else:
-                    ch1 = self.data['target']
-                    ch2 = self.data['input']
-                    inp1 = self.netG.get_xt_clean(ch1, ch2, torch.Tensor([0.999]*len(ch1)).to(ch1.device), update=True)
+                    if self.netG.partial_step_training:
+                        ch1 = self.data['target'][:, :1]
+                        ch2 = self.data['target'][:, 1:2]
+                        inp1, inp2 = self.netG.get_xt_clean(
+                            ch1,
+                            ch2,
+                            torch.full(
+                                (len(ch1),),
+                                0.5,
+                                device=ch1.device,
+                            ),
+                            update=False,
+                        )
+                    else:
+                        ch1 = self.data['target']
+                        ch2 = self.data['input']
+                        inp1 = self.netG.get_xt_clean(
+                            ch1,
+                            ch2,
+                            torch.Tensor([0.999]*len(ch1)).to(ch1.device),
+                            update=False,
+                        )
                 # the hope is that with time, once the statistics are learned, both inp1 and inp2 will be the same.
                 # normalization happens here. 
-                self.prediction = self.netG.inference(inp1,continuous=continuous)
+                if self.netG.partial_step_training:
+                    self.prediction = self.netG.inference(
+                        (inp1, inp2),
+                        continuous=continuous,
+                        t_float_start=0.5,
+                    )
+                else:
+                    self.prediction = self.netG.inference(inp1,continuous=continuous)
 
         self.netG.train()
 

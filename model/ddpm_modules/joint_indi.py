@@ -71,6 +71,7 @@ class JointIndi(nn.Module):
     ):
         super().__init__()
         self._enable_unsupervised_arithmetic = unsupervised_arithmetic
+        self.partial_step_training = partial_step_training
         assert denoise_fn_ch1 is not None, "denoise_fn_ch1 is not provided."
         assert denoise_fn_ch2 is not None, "denoise_fn_ch2 is not provided."
         assert denoise_fn is None, "denoise_fn is not needed."
@@ -171,7 +172,7 @@ class JointIndi(nn.Module):
             tar2_norm = pred_dict2['target']
         else:
             tar1_norm = self.indi1.normalize_xt(x_in_ch1['target'], torch.Tensor([0.001]*len(x_in_ch1['target'])).to(device))
-            tar2_norm = self.indi1.normalize_xt(x_in_ch2['target'], torch.Tensor([0.999]*len(x_in_ch2['target'])).to(device))
+            tar2_norm = self.indi2.normalize_xt(x_in_ch2['target'], torch.Tensor([0.999]*len(x_in_ch2['target'])).to(device))
         
         loss_ch1 = self.indi1.loss_func(tar1_norm, x_recon_ch1)
         loss_ch2 = self.indi2.loss_func(tar2_norm, x_recon_ch2)
@@ -251,8 +252,12 @@ class JointIndi(nn.Module):
             t_float_start_ch1 = self.time_predictor1(x_in).cpu().item()
             t_float_start_ch2 = self.time_predictor2(x_in).cpu().item()
         
-        ch1 = self.indi1.inference(x_in, continuous=continuous, num_timesteps=num_timesteps, t_float_start=t_float_start_ch1, eps=eps)
-        ch2 = self.indi2.inference(x_in, continuous=continuous, num_timesteps=num_timesteps, t_float_start=t_float_start_ch2, eps=eps)
+        if isinstance(x_in, (tuple, list)):
+            x_in_ch1, x_in_ch2 = x_in
+        else:
+            x_in_ch1 = x_in_ch2 = x_in
+        ch1 = self.indi1.inference(x_in_ch1, continuous=continuous, num_timesteps=num_timesteps, t_float_start=t_float_start_ch1, eps=eps)
+        ch2 = self.indi2.inference(x_in_ch2, continuous=continuous, num_timesteps=num_timesteps, t_float_start=t_float_start_ch2, eps=eps)
         return torch.cat([ch1, ch2], dim=1)
 
     def get_xt_clean(self, x_start, x_end, t:float, update=True):

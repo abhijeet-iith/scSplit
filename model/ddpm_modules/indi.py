@@ -71,11 +71,21 @@ class InDI(GaussianDiffusion):
 
     @torch.no_grad()
     def inference_one_step(self, x_t, delta_t, t_cur):
-        assert delta_t <= t_cur, f"delta_t:{delta_t} should be less than or equal to t_cur:{t_cur}."
-        t_cur = torch.Tensor([t_cur]).to(x_t.device)
-        x_0 = self.denoise_fn(x_t, t_cur)
+        if delta_t > t_cur:
+            if delta_t - t_cur > 1e-8:
+                raise ValueError(
+                    f"delta_t:{delta_t} should be less than or equal to t_cur:{t_cur}."
+                )
+            delta_t = t_cur
+        t_cur_tensor = torch.as_tensor([t_cur], dtype=x_t.dtype, device=x_t.device)
+        if self.partial_step_training:
+            step_tensor = torch.as_tensor([delta_t], dtype=x_t.dtype, device=x_t.device)
+            noisy_x_t = x_t + torch.randn_like(x_t) * self.get_t_times_e(t_cur_tensor)
+            return self.denoise_fn(noisy_x_t, step_tensor)
+
+        x_0 = self.denoise_fn(x_t, t_cur_tensor)
         noise = torch.randn_like(x_t) * self.get_t_times_e(t_cur-delta_t)
-        x_prev_t = delta_t/t_cur * x_0 + (1 - delta_t/t_cur) * x_t + noise
+        x_prev_t = delta_t/t_cur_tensor * x_0 + (1 - delta_t/t_cur_tensor) * x_t + noise
         return x_prev_t
 
     @torch.no_grad()
@@ -91,13 +101,18 @@ class InDI(GaussianDiffusion):
 
         # factor = self.out_channel // x_in.shape[1]
         # x_in = torch.cat([x_in]*factor, dim=1)
-        x_t = x_in + torch.randn_like(x_in)*self.get_t_times_e(torch.Tensor([t_float_start]).to(device))
+        if self.partial_step_training:
+            x_t = x_in
+        else:
+            x_t = x_in + torch.randn_like(x_in)*self.get_t_times_e(
+                torch.Tensor([t_float_start]).to(device)
+            )
         delta = t_float_start / num_timesteps
         cur_t = t_float_start
         ret_img = x_t
         for idx in range(num_timesteps):
+            cur_t = t_float_start * (num_timesteps - idx) / num_timesteps
             x_t = self.inference_one_step(x_t, delta, cur_t)
-            cur_t -= delta
             if idx % sample_inter == 0 or idx == num_timesteps-1:
                 ret_img = torch.cat([ret_img, x_t], dim=0)
         
@@ -138,7 +153,7 @@ class InDI(GaussianDiffusion):
         Essentially, this is the interpolation between x_start and x_end at time t.
         Optionally, it can normalize the output as well.
         """
-        assert 0 <= t.min(), "t >= 0"
+        assert 0 < t.min(), "t > 0"
         assert t.max() <= 1, "t <= 1. but t is {}".format(t.max())
 
         if len(t.shape) ==1:
@@ -210,11 +225,14 @@ class InDI(GaussianDiffusion):
                     x_end=x_end,
                     t=target_t,
                 )
-                target = self.normalize_xt(target, target_t, update=False)
             else:
                 step_float = t_float
                 target_t = torch.zeros_like(t_float)
-                target = None
+                target = self._xt_normalizer.normalize(
+                    x_start,
+                    target_t,
+                    update=False,
+                )
 
         noise = default(noise, lambda: torch.randn_like(x_clean))
         x_noisy = x_clean + noise * self.get_t_times_e(t_float).reshape(-1, 1, 1, 1)
@@ -233,11 +251,15 @@ class InDI(GaussianDiffusion):
     def p_losses(self, x_in, noise=None):
         x_start = x_in['target']
         x_recon, prediction_dict = self.get_prediction_during_training(x_in, noise=noise)
-        device = x_start.device
         if self.partial_step_training:
             target = prediction_dict['target']
         else:
-            target = self._xt_normalizer.normalize(x_start, torch.Tensor([0.0]*len(x_start)).to(device), update=False)
+            device = x_start.device
+            target = self._xt_normalizer.normalize(
+                x_start,
+                torch.Tensor([0.0]*len(x_start)).to(device),
+                update=False,
+            )
         loss = self.loss_func(target, x_recon)
 
         return loss

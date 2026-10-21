@@ -379,7 +379,24 @@ if __name__ == "__main__":
                             target_img = (target * std_target + mean_target).astype(np.uint16)
                         else:
                             target_img = target.astype(np.uint16)
-                        pred_img = (prediction * std_target + mean_target)
+                        if opt['model'].get('partial_step_training', False):
+                            validation_net = diffusion.netG.module if isinstance(
+                                diffusion.netG,
+                                torch.nn.DataParallel,
+                            ) else diffusion.netG
+                            indi1_normalizer = validation_net.indi1._xt_normalizer
+                            indi2_normalizer = validation_net.indi2._xt_normalizer
+                            pred_mean = np.array([
+                                indi1_normalizer.data_mean[0].item(),
+                                indi2_normalizer.data_mean[0].item(),
+                            ], dtype=np.float32).reshape(1, -1, 1, 1)
+                            pred_std = np.array([
+                                indi1_normalizer.data_std[0].item(),
+                                indi2_normalizer.data_std[0].item(),
+                            ], dtype=np.float32).reshape(1, -1, 1, 1)
+                            pred_img = prediction * pred_std + pred_mean
+                        else:
+                            pred_img = (prediction * std_target + mean_target)
                         
                         # input_img = input_img[0]
                         target_img = target_img[0]
