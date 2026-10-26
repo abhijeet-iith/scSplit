@@ -158,14 +158,16 @@ class UNet(nn.Module):
         with_time_emb=True,
         image_size=128,
         initial_instance_norm=False,
+        time_condition_dim=1,
     ):
         super().__init__()
         self.init_instance_norm = None if initial_instance_norm is False else nn.InstanceNorm2d(in_channel)
         if with_time_emb:
             time_dim = inner_channel
+            self.time_condition_dim = time_condition_dim
             self.time_mlp = nn.Sequential(
                 TimeEmbedding(inner_channel),
-                nn.Linear(inner_channel, inner_channel * 4),
+                nn.Linear(inner_channel * time_condition_dim, inner_channel * 4),
                 Swish(),
                 nn.Linear(inner_channel * 4, inner_channel)
             )
@@ -220,7 +222,13 @@ class UNet(nn.Module):
         print(f'{[self.__class__.__name__]} with in_channel {in_channel}, out_channel {out_channel}, norm_groups {norm_groups}, image_size {image_size}, initial_instance_norm {self.init_instance_norm is not None}')
 
     def forward(self, x, time):
-        t = self.time_mlp(time) if exists(self.time_mlp) else None
+        if exists(self.time_mlp):
+            time_embedding = self.time_mlp[0](time)
+            if time_embedding.ndim == 3:
+                time_embedding = time_embedding.reshape(time_embedding.shape[0], -1)
+            t = self.time_mlp[1:](time_embedding)
+        else:
+            t = None
         feats = []
         if self.init_instance_norm is not None:
             x = self.init_instance_norm(x)

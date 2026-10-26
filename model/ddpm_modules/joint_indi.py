@@ -68,6 +68,7 @@ class JointIndi(nn.Module):
         xt_normalizer_1=None,
         xt_normalizer_2=None,
         partial_step_training=False,
+        partial_step_conditioning="b",
     ):
         super().__init__()
         self._enable_unsupervised_arithmetic = unsupervised_arithmetic
@@ -92,6 +93,7 @@ class JointIndi(nn.Module):
                             time_predictor=self.time_predictor1,
                             xt_normalizer=xt_normalizer_1,
                             partial_step_training=partial_step_training,
+                            partial_step_conditioning=partial_step_conditioning,
                           )
 
         self.indi2 = indi_class(denoise_fn_ch2, image_size, channels=channels, 
@@ -105,6 +107,7 @@ class JointIndi(nn.Module):
                             time_predictor=self.time_predictor2,
                             xt_normalizer=xt_normalizer_2,
                             partial_step_training=partial_step_training,
+                            partial_step_conditioning=partial_step_conditioning,
                             )
 
         self.val_num_timesteps = self.indi1.val_num_timesteps

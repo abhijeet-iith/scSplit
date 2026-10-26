@@ -91,6 +91,7 @@ def init_weights(net, init_type='kaiming', scale=1, std=0.02):
 def define_G(opt):
 
     model_opt = opt['model']
+    time_condition_dim = 1
     model_kwargs = {}
     if ('norm_groups' not in model_opt['unet']) or model_opt['unet']['norm_groups'] is None:
         model_opt['unet']['norm_groups']=32
@@ -116,6 +117,16 @@ def define_G(opt):
         model_kwargs['xt_normalizer_1'] = model_opt.get('xt_normalizer_1', None)
         model_kwargs['xt_normalizer_2'] = model_opt.get('xt_normalizer_2', None)
         model_kwargs['partial_step_training'] = model_opt.get('partial_step_training', False)
+        model_kwargs['partial_step_conditioning'] = model_opt.get(
+            'partial_step_conditioning', 'b'
+        )
+        if model_kwargs['partial_step_conditioning'] not in ('b', 'tb'):
+            raise ValueError(
+                "partial_step_conditioning must be 'b' or 'tb'"
+            )
+        time_condition_dim = (
+            2 if model_kwargs['partial_step_conditioning'] == 'tb' else 1
+        )
     else:
         raise NotImplementedError(
             'Generator model [{:s}] not recognized'.format(model_opt['which_model_G']))
@@ -133,6 +144,7 @@ def define_G(opt):
         dropout=model_opt['unet']['dropout'],
         image_size=model_opt['diffusion']['image_size'],
         initial_instance_norm=model_opt['unet'].get('initial_instance_norm', False),
+        time_condition_dim=time_condition_dim,
         )
         
     else:
@@ -148,6 +160,7 @@ def define_G(opt):
         dropout=model_opt['unet']['dropout'],
         image_size=model_opt['diffusion']['image_size'],
         initial_instance_norm=model_opt['unet'].get('initial_instance_norm', False),
+        time_condition_dim=time_condition_dim,
          )
         
         denoise_fn_ch2 = UNetDdpm(
@@ -161,6 +174,7 @@ def define_G(opt):
         dropout=model_opt['unet']['dropout'],
         image_size=model_opt['diffusion']['image_size'],
         initial_instance_norm=model_opt['unet'].get('initial_instance_norm', False),
+        time_condition_dim=time_condition_dim,
          )
         model_kwargs['denoise_fn_ch1'] = denoise_fn_ch1
         model_kwargs['denoise_fn_ch2'] = denoise_fn_ch2

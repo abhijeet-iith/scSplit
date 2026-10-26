@@ -28,6 +28,7 @@ class InDI(GaussianDiffusion):
         time_predictor=None,
         xt_normalizer=None,
         partial_step_training=False,
+        partial_step_conditioning="b",
     ):
         super().__init__(denoise_fn, image_size, channels=channels, loss_type=loss_type, conditional=conditional, 
                          lr_reduction=lr_reduction,
@@ -49,6 +50,11 @@ class InDI(GaussianDiffusion):
         self._xt_normalizer = xt_normalizer
         self._normalize_xt = self._xt_normalizer is not None
         self.partial_step_training = partial_step_training
+        if partial_step_conditioning not in ("b", "tb"):
+            raise ValueError(
+                "partial_step_conditioning must be 'b' or 'tb'"
+            )
+        self.partial_step_conditioning = partial_step_conditioning
 
         msg = f'Sampling mode: {self._t_sampling_mode}, Noise mode: {self._noise_mode}'
         print(f'[{self.__class__.__name__}]: {msg}')
@@ -79,9 +85,18 @@ class InDI(GaussianDiffusion):
             delta_t = t_cur
         t_cur_tensor = torch.as_tensor([t_cur], dtype=x_t.dtype, device=x_t.device)
         if self.partial_step_training:
-            step_tensor = torch.as_tensor([delta_t], dtype=x_t.dtype, device=x_t.device)
+            step_tensor = torch.full(
+                (x_t.shape[0],),
+                delta_t,
+                dtype=x_t.dtype,
+                device=x_t.device,
+            )
+            if self.partial_step_conditioning == "tb":
+                condition = torch.stack([t_cur_tensor.expand_as(step_tensor), step_tensor], dim=1)
+            else:
+                condition = step_tensor
             noisy_x_t = x_t + torch.randn_like(x_t) * self.get_t_times_e(t_cur_tensor)
-            return self.denoise_fn(noisy_x_t, step_tensor)
+            return self.denoise_fn(noisy_x_t, condition)
 
         x_0 = self.denoise_fn(x_t, t_cur_tensor)
         noise = torch.randn_like(x_t) * self.get_t_times_e(t_cur-delta_t)
@@ -238,7 +253,10 @@ class InDI(GaussianDiffusion):
         x_noisy = x_clean + noise * self.get_t_times_e(t_float).reshape(-1, 1, 1, 1)
 
         assert self.conditional is False
-        conditioning_time = step_float if self.partial_step_training else t_float
+        if self.partial_step_training and self.partial_step_conditioning == "tb":
+            conditioning_time = torch.stack([t_float, step_float], dim=1)
+        else:
+            conditioning_time = step_float if self.partial_step_training else t_float
         x_recon = self.denoise_fn(x_noisy, conditioning_time)
         return x_recon, {
             't_float': t_float,
